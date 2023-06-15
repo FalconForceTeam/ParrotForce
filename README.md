@@ -1,4 +1,4 @@
-# ParrotForce
+# ParrotForce 🦜
 Azure playbook for automatic evidence collection through MDE
 
 ## Prerequisites
