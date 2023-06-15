@@ -1,0 +1,426 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "metadata": {
+        "title": "ParrotForce",
+        "description": "",
+        "prerequisites": "1. You will need to create machineTags 'HighJewel' and 'MediumJewel' 2. You will need to grant 'AdvancedQuery.Read.All', 'Alert.Read.All', 'File.Read.All', 'Machine.CollectForensics' and 'MachineLiveResponse' permissions to the managed identity ",
+        "lastUpdateTime": "2023-06-10T00:00:00.000Z",
+        "entities": [ "Host" ],
+        "tags": [ "Response" ],
+        "support": {
+            "tier": "community"
+        },
+        "author": {
+            "name": "FalconForce"
+        }
+    },
+    "parameters": {
+        "PlaybookName": {
+            "defaultValue": "ParrotForce",
+            "type": "string"
+        }
+    },
+    "variables": {
+        "AzureSentinelConnectionName": "[concat('azuresentinel-', parameters('PlaybookName'))]",
+        "MDATPConnectionName": "[concat('wdatp-', parameters('PlaybookName'))]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "ParrotForce",
+            "location": "westeurope",
+            "properties": {
+                "state": "Enabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "$connections": {
+                            "defaultValue": {},
+                            "type": "Object"
+                        }
+                    },
+                    "triggers": {
+                        "Microsoft_Sentinel_incident": {
+                            "type": "ApiConnectionWebhook",
+                            "inputs": {
+                                "body": {
+                                    "callback_url": "@{listCallbackUrl()}"
+                                },
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                    }
+                                },
+                                "path": "/incident-creation"
+                            }
+                        }
+                    },
+                    "actions": {
+                        "Initialize_variable": {
+                            "runAfter": {},
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "Action",
+                                        "type": "string"
+                                    }
+                                ]
+                            }
+                        },
+                        "Switch": {
+                            "runAfter": {
+                                "Initialize_variable": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "cases": {
+                                "HighJewel": {
+                                    "case": "High",
+                                    "actions": {
+                                        "Entities_-_Get_Hosts_2": {
+                                            "runAfter": {},
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/entities/host"
+                                            }
+                                        },
+                                        "For_each_2": {
+                                            "foreach": "@body('Entities_-_Get_Hosts_2')?['Hosts']",
+                                            "actions": {
+                                                "Machines_-_Get_single_machine_2": {
+                                                    "runAfter": {},
+                                                    "type": "ApiConnection",
+                                                    "inputs": {
+                                                        "host": {
+                                                            "connection": {
+                                                                "name": "@parameters('$connections')['wdatp']['connectionId']"
+                                                            }
+                                                        },
+                                                        "method": "get",
+                                                        "path": "/api/machines/@{encodeURIComponent('')}"
+                                                    }
+                                                },
+                                                "TagCheck1": {
+                                                    "foreach": "@body('Machines_-_Get_single_machine_2')?['machineTags']",
+                                                    "actions": {
+                                                        "Condition_2": {
+                                                            "actions": {
+                                                                "Actions_-_Run_live_response": {
+                                                                    "runAfter": {},
+                                                                    "type": "ApiConnection",
+                                                                    "inputs": {
+                                                                        "body": {
+                                                                            "Commands": [
+                                                                                {
+                                                                                    "params": [
+                                                                                        {
+                                                                                            "key": "ScriptName",
+                                                                                            "value": "trident.ps1"
+                                                                                        },
+                                                                                        {
+                                                                                            "key": "FileName",
+                                                                                            "value": "winpmem.exe"
+                                                                                        }
+                                                                                    ],
+                                                                                    "type": "PutFile"
+                                                                                },
+                                                                                {
+                                                                                    "params": [
+                                                                                        {
+                                                                                            "key": "ScriptName",
+                                                                                            "value": "trident.ps1 -a"
+                                                                                        }
+                                                                                    ],
+                                                                                    "type": "RunScript"
+                                                                                },
+                                                                                {
+                                                                                    "params": [
+                                                                                        {
+                                                                                            "key": "Path",
+                                                                                            "value": "C:\\ProgramData\\\\Microsoft\\\\Windows Defender Advanced Threat Protection\\\\Downloads\\\\TRIDENT_*.txt"
+                                                                                        }
+                                                                                    ],
+                                                                                    "type": "GetFile"
+                                                                                }
+                                                                            ],
+                                                                            "Comment": "Upload & e Execute Forensic Tools"
+                                                                        },
+                                                                        "host": {
+                                                                            "connection": {
+                                                                                "name": "@parameters('$connections')['wdatp']['connectionId']"
+                                                                            }
+                                                                        },
+                                                                        "method": "post",
+                                                                        "path": "/api/machines/@{encodeURIComponent('')}/runliveresponse"
+                                                                    }
+                                                                },
+                                                                "Add_comment_to_incident_(V3)_2": {
+                                                                    "runAfter": {
+                                                                        "Actions_-_Run_live_response": [
+                                                                            "Succeeded"
+                                                                        ]
+                                                                    },
+                                                                    "type": "ApiConnection",
+                                                                    "inputs": {
+                                                                        "body": {
+                                                                            "incidentArmId": "@triggerBody()?['object']?['id']",
+                                                                            "message": "<p>Forensic evidence gathered</p>"
+                                                                        },
+                                                                        "host": {
+                                                                            "connection": {
+                                                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                            }
+                                                                        },
+                                                                        "method": "post",
+                                                                        "path": "/Incidents/Comment"
+                                                                    }
+                                                                }
+                                                            },
+                                                            "runAfter": {},
+                                                            "expression": {
+                                                                "and": [
+                                                                    {
+                                                                        "contains": [
+                                                                            "",
+                                                                            "jewel"
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "type": "If"
+                                                        }
+                                                    },
+                                                    "runAfter": {
+                                                        "Machines_-_Get_single_machine_2": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "Foreach"
+                                                }
+                                            },
+                                            "runAfter": {
+                                                "Entities_-_Get_Hosts_2": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "Foreach"
+                                        }
+                                    }
+                                },
+                                "MediumJewel": {
+                                    "case": "Medium",
+                                    "actions": {
+                                        "Entities_-_Get_Hosts": {
+                                            "runAfter": {},
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/entities/host"
+                                            }
+                                        },
+                                        "For_each": {
+                                            "foreach": "@body('Entities_-_Get_Hosts')?['Hosts']",
+                                            "actions": {
+                                                "Machines_-_Get_single_machine": {
+                                                    "runAfter": {},
+                                                    "type": "ApiConnection",
+                                                    "inputs": {
+                                                        "host": {
+                                                            "connection": {
+                                                                "name": "@parameters('$connections')['wdatp']['connectionId']"
+                                                            }
+                                                        },
+                                                        "method": "get",
+                                                        "path": "/api/machines/@{encodeURIComponent('')}"
+                                                    }
+                                                },
+                                                "TagCheck": {
+                                                    "foreach": "@body('Machines_-_Get_single_machine')?['machineTags']",
+                                                    "actions": {
+                                                        "Condition": {
+                                                            "actions": {
+                                                                "Actions_-_Collect_investigation_package": {
+                                                                    "runAfter": {},
+                                                                    "type": "ApiConnection",
+                                                                    "inputs": {
+                                                                        "body": {
+                                                                            "Comment": "Investigation Package initiation"
+                                                                        },
+                                                                        "host": {
+                                                                            "connection": {
+                                                                                "name": "@parameters('$connections')['wdatp']['connectionId']"
+                                                                            }
+                                                                        },
+                                                                        "method": "post",
+                                                                        "path": "/api/machines/@{encodeURIComponent('')}/collectInvestigationPackage"
+                                                                    }
+                                                                },
+                                                                "Actions_-_Get_investigation_package_download_URI": {
+                                                                    "runAfter": {
+                                                                        "Until": [
+                                                                            "Succeeded"
+                                                                        ]
+                                                                    },
+                                                                    "type": "ApiConnection",
+                                                                    "inputs": {
+                                                                        "host": {
+                                                                            "connection": {
+                                                                                "name": "@parameters('$connections')['wdatp']['connectionId']"
+                                                                            }
+                                                                        },
+                                                                        "method": "get",
+                                                                        "path": "/api/machineactions/@{encodeURIComponent('')}/getPackageUri"
+                                                                    }
+                                                                },
+                                                                "Add_comment_to_incident_(V3)": {
+                                                                    "runAfter": {
+                                                                        "Actions_-_Get_investigation_package_download_URI": [
+                                                                            "Succeeded"
+                                                                        ]
+                                                                    },
+                                                                    "type": "ApiConnection",
+                                                                    "inputs": {
+                                                                        "body": {
+                                                                            "incidentArmId": "@triggerBody()?['object']?['id']",
+                                                                            "message": "<p>Download Investigation Package at: @{body('Actions_-_Get_investigation_package_download_URI')?['value']}</p>"
+                                                                        },
+                                                                        "host": {
+                                                                            "connection": {
+                                                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                            }
+                                                                        },
+                                                                        "method": "post",
+                                                                        "path": "/Incidents/Comment"
+                                                                    }
+                                                                },
+                                                                "Set_variable": {
+                                                                    "runAfter": {
+                                                                        "Actions_-_Collect_investigation_package": [
+                                                                            "Succeeded"
+                                                                        ]
+                                                                    },
+                                                                    "type": "SetVariable",
+                                                                    "inputs": {
+                                                                        "name": "Action",
+                                                                        "value": "InProgress"
+                                                                    }
+                                                                },
+                                                                "Until": {
+                                                                    "actions": {
+                                                                        "Actions_-_Get_single_machine_action": {
+                                                                            "runAfter": {},
+                                                                            "type": "ApiConnection",
+                                                                            "inputs": {
+                                                                                "host": {
+                                                                                    "connection": {
+                                                                                        "name": "@parameters('$connections')['wdatp']['connectionId']"
+                                                                                    }
+                                                                                },
+                                                                                "method": "get",
+                                                                                "path": "/api/machineactions/@{encodeURIComponent('')}"
+                                                                            }
+                                                                        },
+                                                                        "Set_variable_2": {
+                                                                            "runAfter": {
+                                                                                "Actions_-_Get_single_machine_action": [
+                                                                                    "Succeeded"
+                                                                                ]
+                                                                            },
+                                                                            "type": "SetVariable",
+                                                                            "inputs": {
+                                                                                "name": "Action",
+                                                                                "value": "Succeeded"
+                                                                            }
+                                                                        }
+                                                                    },
+                                                                    "runAfter": {
+                                                                        "Set_variable": [
+                                                                            "Succeeded"
+                                                                        ]
+                                                                    },
+                                                                    "expression": "@equals(variables('Action'), 'Succeeded')",
+                                                                    "limit": {
+                                                                        "count": 60,
+                                                                        "timeout": "PT1H"
+                                                                    },
+                                                                    "type": "Until"
+                                                                }
+                                                            },
+                                                            "runAfter": {},
+                                                            "expression": {
+                                                                "and": [
+                                                                    {
+                                                                        "contains": [
+                                                                            "",
+                                                                            "DC, Jewel, Sensitive, Critical"
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "type": "If"
+                                                        }
+                                                    },
+                                                    "runAfter": {
+                                                        "Machines_-_Get_single_machine": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "Foreach"
+                                                }
+                                            },
+                                            "runAfter": {
+                                                "Entities_-_Get_Hosts": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "Foreach"
+                                        }
+                                    }
+                                }
+                            },
+                            "default": {
+                                "actions": {}
+                            },
+                            "expression": "@triggerBody()?['object']?['properties']?['severity']",
+                            "type": "Switch"
+                        }
+                    },
+                    "outputs": {}
+                },
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "azuresentinel": {
+                                "connectionId": "/subscriptions/80110e3c-3ec4-4567-b06d-7d47a72562f5/resourceGroups/ResponseOps/providers/Microsoft.Web/connections/azuresentinel-1",
+                                "connectionName": "azuresentinel-1",
+                                "id": "/subscriptions/80110e3c-3ec4-4567-b06d-7d47a72562f5/providers/Microsoft.Web/locations/westeurope/managedApis/azuresentinel"
+                            },
+                            "wdatp": {
+                                "connectionId": "/subscriptions/80110e3c-3ec4-4567-b06d-7d47a72562f5/resourceGroups/ResponseOps/providers/Microsoft.Web/connections/wdatp",
+                                "connectionName": "wdatp",
+                                "id": "/subscriptions/80110e3c-3ec4-4567-b06d-7d47a72562f5/providers/Microsoft.Web/locations/westeurope/managedApis/wdatp"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ]
+}
