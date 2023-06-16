@@ -1,5 +1,5 @@
 # 🦜ParrotForce 
-Azure playbook for automatic evidence collection through MDE
+Azure playbook for automatic evidence collection
 
 ## Prerequisites
 ParrotForce uses connections to Azure Sentinel and Microsoft 365 Defender to function. The following API permissions need to be present in your managed identity that connects to Azure Sentinel and Microsoft 365 Defender:
